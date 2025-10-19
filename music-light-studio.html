@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Music Light Studio</title>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    background-color: #111;
+    color: #eee;
+    text-align: center;
+    padding: 20px;
+  }
+  h1 { color: #00ffff; }
+
+  /* Responsive LED grid */
+  #grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(50px, 1fr));
+    gap: 10px;
+    justify-items: center;
+    margin-top: 20px;
+    width: 90%;
+    max-width: 1000px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .led {
+    width: 100%;
+    padding-bottom: 100%;
+    border-radius: 10%;
+    background-color: #000;
+    box-shadow: 0 0 5px #000;
+    transition: background-color 0.1s;
+  }
+
+  input, button {
+    margin: 5px;
+    padding: 8px;
+    border-radius: 5px;
+    border: none;
+  }
+  button {
+    background-color: #008CBA;
+    color: white;
+    cursor: pointer;
+  }
+  button:hover { background-color: #005f73; }
+
+  #sequence {
+    margin-top: 20px;
+    max-width: 700px;
+    margin-left: auto;
+    margin-right: auto;
+    background: #222;
+    padding: 10px;
+    border-radius: 10px;
+  }
+  #sequence div {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 5px;
+  }
+  .color-box {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    border-radius: 4px;
+    margin-left: 5px;
+    border: 1px solid #555;
+  }
+
+  /* Smaller YouTube display */
+  #youtube-player {
+    width: 420px;
+    height: 236px;
+    max-width: 90%;
+  }
+</style>
+</head>
+<body>
+<h1>🎶 Music Light Studio</h1>
+<p>Create and test light patterns synced to your favourite songs!</p>
+
+<div style="margin-top: 1rem;">
+  <input type="text" id="youtube-url" placeholder="Paste YouTube URL here" style="width:60%;">
+  <button onclick="setYouTubeVideo()">Load Video</button>
+</div>
+
+<div style="margin-top:1rem;">
+  <iframe
+    id="youtube-player"
+    src=""
+    title="YouTube video player"
+    frameborder="0"
+    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+    allowfullscreen
+  ></iframe>
+</div>
+
+<hr style="margin: 20px 0; border-color: #333;">
+
+<div id="controls">
+  <label>Pick Colour:</label>
+  <input type="color" id="colorPicker" value="#ff0000" onchange="updateCurrentColorDisplay()">
+  <span id="currentColorBox" class="color-box" style="background-color:#ff0000"></span>
+
+  <input type="number" id="delayInput" value="0.5" min="0.05" step="0.05">
+  <label>Delay (s)</label>
+
+  <input type="number" id="repeatInput" value="1" min="0" step="1" style="width:60px;">
+  <label>Repeat (0 = infinite)</label>
+
+  <button onclick="addStep()">Add Step</button>
+  <button onclick="playSequence()">Play Sequence</button>
+  <button onclick="stopSequence()">Stop Sequence</button>
+  <button onclick="exportSequence()">Export for Pico</button>
+</div>
+
+<div id="sequence"></div>
+<div id="grid"></div>
+
+<script>
+const grid = document.getElementById("grid");
+const sequenceDiv = document.getElementById("sequence");
+const currentColorBox = document.getElementById("currentColorBox");
+const NUM_LEDS = 15;
+let sequence = [];
+let stopRequested = false;
+
+function buildGrid() {
+  grid.innerHTML = "";
+  for (let i = 0; i < NUM_LEDS; i++) {
+    const led = document.createElement("div");
+    led.className = "led";
+    grid.appendChild(led);
+  }
+}
+buildGrid();
+
+function updateCurrentColorDisplay() {
+  const color = document.getElementById("colorPicker").value;
+  currentColorBox.style.backgroundColor = color;
+}
+
+function addStep() {
+  const color = document.getElementById("colorPicker").value;
+  const delay = parseFloat(document.getElementById("delayInput").value);
+  sequence.push({ color, delay });
+  renderSequence();
+}
+
+function renderSequence() {
+  sequenceDiv.innerHTML = "";
+  sequence.forEach((step, index) => {
+    const div = document.createElement("div");
+    div.innerHTML = `
+      <div>
+        <span style="color:${step.color}">●</span>
+        ${step.color} - ${step.delay}s
+      </div>
+      <div>
+        <button onclick="moveStepUp(${index})">↑</button>
+        <button onclick="moveStepDown(${index})">↓</button>
+        <button onclick="removeStep(${index})">Remove</button>
+      </div>
+    `;
+    sequenceDiv.appendChild(div);
+  });
+}
+
+function removeStep(index) {
+  sequence.splice(index, 1);
+  renderSequence();
+}
+
+function moveStepUp(index) {
+  if (index > 0) {
+    [sequence[index-1], sequence[index]] = [sequence[index], sequence[index-1]];
+    renderSequence();
+  }
+}
+
+function moveStepDown(index) {
+  if (index < sequence.length - 1) {
+    [sequence[index+1], sequence[index]] = [sequence[index], sequence[index+1]];
+    renderSequence();
+  }
+}
+
+function stopSequence() {
+  stopRequested = true;
+  const leds = document.querySelectorAll(".led");
+  leds.forEach(led => led.style.backgroundColor = "#000");
+  const player = document.getElementById("youtube-player");
+  if (player.src) {
+    player.contentWindow.postMessage('{"event":"command","func":"pauseVideo","args":""}', '*');
+  }
+}
+
+async function playSequence() {
+  const leds = document.querySelectorAll(".led");
+  const player = document.getElementById("youtube-player");
+  const repeatCount = parseInt(document.getElementById("repeatInput").value);
+  stopRequested = false;
+
+  await new Promise(r => setTimeout(r, 1000));
+
+  if (player.src) {
+    player.contentWindow.postMessage('{"event":"command","func":"playVideo","args":""}', '*');
+  }
+
+  let loop = 0;
+  while ((repeatCount === 0 || loop < repeatCount) && !stopRequested) {
+    loop++;
+    for (const step of sequence) {
+      if (stopRequested) break;
+      leds.forEach(led => led.style.backgroundColor = step.color);
+      await new Promise(r => setTimeout(r, step.delay * 1000));
+      leds.forEach(led => led.style.backgroundColor = "#000");
+    }
+  }
+}
+
+function exportSequence() {
+  let code = "sequence = [\n";
+  sequence.forEach(s => {
+    code += `    ("${s.color}", ${s.delay}),\n`;
+  });
+  code += "]\n\n";
+  code += `for color, delay in sequence:\n    led_strip.fill(parse_color_input(color))\n    led_strip.write()\n    time.sleep(delay)\n    clear_strip()\n`;
+  navigator.clipboard.writeText(code);
+  alert("Exported sequence copied to clipboard for Thorny!");
+}
+
+function setYouTubeVideo() {
+  const input = document.getElementById("youtube-url").value.trim();
+  const embed = document.getElementById("youtube-player");
+  const videoIdMatch = input.match(/(?:v=|youtu\.be\/|embed\/)([a-zA-Z0-9_-]{11})/);
+
+  if (videoIdMatch) {
+    const videoId = videoIdMatch[1];
+    embed.src = `https://www.youtube.com/embed/${videoId}?rel=0&showinfo=0&controls=1&enablejsapi=1`;
+  } else {
+    alert("Please enter a valid YouTube URL.");
+  }
+}
+</script>
+</body>
+</html>
